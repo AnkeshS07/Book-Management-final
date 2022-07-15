@@ -3,6 +3,42 @@ const userModel = require("../models/userModel");
 const reviewModel = require("../models/reviewModel");
 const mongoose = require("mongoose");
 
+const aws = require('aws-sdk')
+
+aws.config.update({
+    accessKeyId: "AKIAY3L35MCRUJ6WPO6J",
+    secretAccessKey: "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",
+    region: "ap-south-1"
+})
+
+let uploadFile= async ( file) =>{
+    return new Promise( function(resolve, reject) {
+     // this function will upload file to aws and return the link
+     let s3= new aws.S3({apiVersion: '2006-03-01'}); // we will be using the s3 service of aws
+ 
+     var uploadParams= {
+         ACL: "public-read",
+         Bucket: "classroom-training-bucket",  //HERE
+         Key: "abc/" + file.originalname, //HERE 
+         Body: file.buffer
+     }
+ 
+ 
+     s3.upload( uploadParams, function (err, data ){
+         if(err) {
+             return reject({"error": err})
+         }
+         console.log(data)
+         console.log("file uploaded succesfully")
+         return resolve(data.Location)
+     })
+ 
+     // let data= await s3.upload( uploadParams)
+     // if( data) return data.Location
+     // else return "there is an error"
+ 
+    })
+ }
 
 function isValid(value) {
   if (typeof value === "undefined" || typeof value === "null") return false;
@@ -15,6 +51,7 @@ const dateRegex=/^\d{4}\-(0?[1-9]|1[012])\-(0?[1-9]|[12][0-9]|3[01])$/
 
 const createBook = async function (req, res) {
   try {
+   
     let data = req.body;
     /*----------------------------VALIDATION STArTS------------------------*/
     if (!isValidBody(data))return res.status(400).send({ status: false, message: "Please provide Details" });
@@ -35,8 +72,8 @@ const createBook = async function (req, res) {
 
     //ISBN
     if (!isValid(ISBN))return res.status(400).send({ status: false, message: "Please provide ISBN" });
-    if (ISBN.trim().length != 13)return res.status(400).send({status: false,message: ` ${ISBN.trim().length} ISBN number not allowed Please give 13 numbers`,});
-    if (!ISBN.match(/^[0-9\-]+$/))return res.status(400).send({status: false,message: `Please provide Numbers in ISBN`});
+    if (!/^(?=(?:\D*\d){10}(?:(?:\D*\d){3})?$)[\d-]+$/.test(ISBN.trim())) {
+      return res.status(400).send({ status: false, message: "Please Enter valid ISBN number" })}
     let checkISBN = await bookModel.findOne({ ISBN });
     if (checkISBN)return res.status(400).send({ status: false, message: `${ISBN} is already Taken!` });
 
@@ -55,7 +92,21 @@ const createBook = async function (req, res) {
     if(reviews){
       if (typeof reviews !== "number")return res.status(400).send({ status: false, message: "Please provide reviews in numbers" })}
 /*----------------------------VALIDATION ENDS----------------------------------*/
+       
       
+let files = req.files
+        
+if(!files || files.length==0){ 
+   return res.status(400).send({ status : false,  msg: "No file found" })
+}
+
+   //upload to s3 and get the uploaded link
+    // res.send the link back to frontend/postman
+
+    let uploadedFileURL= await uploadFile( files[0] )
+    data.bookCover = uploadedFileURL
+    
+
     let saveData = await bookModel.create(data);
     return res.status(201).send({ status: true, message: "Success", data: saveData });
   } catch (error) {
@@ -74,7 +125,7 @@ const getBooksDetails = async function (req, res) {
     }
 //-----------------------------------------------------------------------------//
 
-    let search = await bookModel.find({ $and: [{ isDeleted: false }, data] }).select({_id: 1,title: 1,excerpt: 1,userId: 1,category: 1,releasedAt: 1,reviews:1}).sort({title:1});
+    let search = await bookModel.find({ $and: [{ isDeleted: false }, data] }).select({_id: 1,title: 1,excerpt: 1,userId: 1,category: 1,releasedAt: 1,reviews:1}).collation().sort({title:1});
     if(search.length==0)return res.status(404).send({ Status: false, message: "Not found" })
     return res.status(200).send({ status: true, message: "Books list", data: search });
   } catch (error) {
@@ -120,7 +171,7 @@ const updateBookById = async function (req, res) {
     
     let uniqueTitle = await bookModel.findOne({ title: temp.title });
     if (uniqueTitle)return res.status(400).send({status: false,message: `Title is already taken`,
-      })
+      });
       
       let uniqueISBN = await bookModel.findOne({ ISBN: temp.ISBN });
       if (uniqueISBN)return res.status(400).send({status: false,message: `ISBN is already present `});
